@@ -38,7 +38,7 @@ epoch = 10
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 ##########################################
 filepath = 'food-11_sample'
-# filepath = 'food-11'
+#filepath = 'food-11'
 ##########################
 
 #读数据
@@ -47,7 +47,7 @@ val_loader = getDataLoader(filepath, 'val', batchSize)
 no_label_Loader = getDataLoader(filepath,'train_unl', batchSize)
 
 
-#模型和超参数
+#模型和超参数, 超参数（Hyperparameter）是模型训练前手动设置、训练过程中不会被优化的参数
 model, input_size = initialize_model(model_name, 11, use_pretrained=False)
 
 print(input_size)
@@ -78,4 +78,4 @@ trainpara = {
 
 
 if __name__ == '__main__':  # 如果运行的模块是当前模块，才执行下面的代码
-    train_val(trainpara)
+    train_val(trainpara)  # 这里直接调用的train.py中的train_val函数，在main.py中设置好总的trainpara传入
