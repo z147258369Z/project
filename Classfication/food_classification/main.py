@@ -7,7 +7,8 @@ import os
 
 from model_utils.model import initialize_model
 from model_utils.train import train_val
-from model_utils.data import getDataLoader
+from model_utils.data import global_getDataLoader
+from model_utils.data import local_getDataLoader
 
 
 # os.environ['CUDA_VISIBLE_DEVICES']='0,1'
@@ -42,10 +43,15 @@ filepath = 'food-11_sample'
 ##########################
 
 #读数据
-train_loader = getDataLoader(filepath, 'train', batchSize)
-val_loader = getDataLoader(filepath, 'val', batchSize)
-no_label_Loader = getDataLoader(filepath,'train_unl', batchSize)
+global_train_loader = global_getDataLoader(filepath, 'train', batchSize)
+local_train_loader =  local_getDataLoader(filepath, 'train', batchSize)
 
+global_val_loader = global_getDataLoader(filepath, 'val', batchSize)
+local_val_loader = local_getDataLoader(filepath, 'val', batchSize)
+
+
+global_no_label_Loader = global_getDataLoader(filepath,'train_unl', batchSize)
+local_no_label_Loader = local_getDataLoader(filepath,'train_unl', batchSize)
 
 #模型和超参数, 超参数（Hyperparameter）是模型训练前手动设置、训练过程中不会被优化的参数
 model, input_size = initialize_model(model_name, 11, use_pretrained=False)
@@ -58,9 +64,12 @@ save_path = 'model_save/model.pth'
 
 trainpara = {
             "model" : model,
-             'train_loader': train_loader,
-             'val_loader': val_loader,
-             'no_label_Loader': no_label_Loader,
+             'global_train_loader': global_train_loader,
+             'local_train_loader': local_train_loader,
+             'global_val_loader': global_val_loader,
+             'local_val_loader': local_val_loader,
+             'global_no_label_Loader': global_no_label_Loader,
+             'local_no_label_Loader': local_no_label_Loader,
              'optimizer': optimizer,
             'batchSize': batchSize,
              'loss': loss,

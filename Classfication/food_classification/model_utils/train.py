@@ -13,8 +13,10 @@ def train_val(para): # 就这一个函数
 ########################################################
     model = para['model']
     semi_loader = para['no_label_Loader']
-    train_loader =para['train_loader']
-    val_loader = para['val_loader']
+    local_train_loader =para['local_train_loader']
+    global_train_loader =para['global_local_train_loader']
+    global_val_loader = para['global_val_loader']
+    local_val_loader = para['local_val_loader']
     optimizer = para['optimizer']
     loss = para['loss']
     epoch = para['epoch']
@@ -46,6 +48,7 @@ def train_val(para): # 就这一个函数
     val_rel = []
     max_acc = 0
 
+    fc_classifier = nn.Linear(1024, 11).to(device) # 两个512维拼接后就是1024
     for i in range(epoch):
         start_time = time.time()
         model.train()
@@ -55,24 +58,30 @@ def train_val(para): # 就这一个函数
         val_loss = 0.0
         semi_acc = 0.0
 
-        # 用zip同步迭代两个loader，保证取到的是同一张图的全局/局部版本
-        # for data_global, data_local in tqdm(zip(train_loader_global, train_loader_local)):
-        for data in tqdm(train_loader):                    #取数据
+     #用zip同步迭代两个loader，保证取到的是同一张图的全局/局部版本
+        for data_global, data_local in tqdm(zip(global_train_loader, local_train_loader)):
+        #for data in tqdm(train_loader):                    #取数据
             optimizer.zero_grad()                           # 梯度置0
-            x, target = data[0].to(device), data[1].to(device)
-            pred = model(x)                                 #模型前向
-            pred_local = model(x)  # 局部特征
+           # x, target = data[0].to(device), data[1].to(device)
+            x_global, target = data_global[0].to(device), data_global[1].to(device)
+            x_local, _ = data_local[0].to(device), data_local[1].to(device)
+            pred_global = model(x_global)                                 #模型前向
+            pred_local = model(x_local)  # 局部特征
             pred_local_enhanced = selfattention_fusion(pred_local)  # 融合后的局部增强特征
             # 再拼接pred和pred_local_enhanced
             # 先把用resnet18得到的全局特征（维度为分类头11）升维到512(和融合后的局部特征同维)
-            pred_all = nn.Linear(pred, 512).to(device)
+            pred_all = nn.Linear(pred_global, 512).to(device)
             pred_final =  torch.cat([pred_all, pred_local_enhanced], dim=1)
 
             # 再通过展平，全连接，把pred_final变成分类头11维
+            pred_final_flat = torch.flatten(pred_final, start_dim=1)  # 若已为二维，这步可省略
+
+        # 3. 得到11维分类输出
+            pred_class = fc_classifier(pred_final_flat)
 
             # 再用这个pred_final变成分类头后的结果与标签target计算loss，同时更新两个模型
 
-            bat_loss = loss(pred_final, target)                   # 算交叉熵loss
+            bat_loss = loss(pred_class, target)                   # 算交叉熵loss
             # 假设我自己的模型换成resnet来提取局部特征，只更新这一个共同的特征提取器
             bat_loss.backward()                                 # 回传梯度
             optimizer.step()                                    # 根据梯度更新
@@ -83,7 +92,7 @@ def train_val(para): # 就这一个函数
      # y 对应标签（监督信号），这是 PyTorch 处理监督学习任务的通用且标准的约定
     # 所以data[0]是x，data[1]是y
     # 记录分类预测正确的样本总数,表示准确率
-            train_acc += np.sum(np.argmax(pred.cpu().data.numpy(),axis=1) == data[1].numpy())
+            train_acc += np.sum(np.argmax(pred_class.cpu().data.numpy(),axis=1) == data_global[1].numpy())
 
             # 预测值和标签相等，正确数就加1.  相等多个， 就加几。
 
@@ -103,28 +112,35 @@ def train_val(para): # 就这一个函数
             print('semi_acc:', plt_semi_acc[-1])
         # 结束半监督训练语句块了
 
-        plt_train_loss.append(train_loss/train_loader.dataset.__len__())
-        plt_train_acc.append(train_acc/train_loader.dataset.__len__())
+        plt_train_loss.append(train_loss/global_train_loader.dataset.__len__())
+        plt_train_acc.append(train_acc/global_train_loader.dataset.__len__())
+
         if i % val_epoch == 0:  # 每隔 val_epoch 个迭代 /epoch，执行一次验证（validation）,保存更优模型操作
             model.eval() # 切换到验证模式
             with torch.no_grad(): # 验证模式不需要计算梯度
-                for valdata in val_loader:
-                    val_x , val_target = valdata[0].to(device), valdata[1].to(device)
-                    val_pred = model(val_x)
-                    val_bat_loss = loss(val_pred, val_target)
+                for val_x_global, val_x_local in tqdm(zip(global_val_loader, local_val_loader)):
+                    val_x_global , val_target = val_x_global[0].to(device), val_x_global[1].to(device)
+                    val_pred_global = model(val_x_global)
+                    val_pred_local = model(val_x_local)  # 局部特征
+                    valpred_local_enhanced = selfattention_fusion(val_pred_local)  # 融合后的局部增强特征
+                    val_pred_all = nn.Linear(val_pred_global, 512).to(device)
+                    val_pred_final = torch.cat([val_pred_all, valpred_local_enhanced], dim=1)
+                    val_pred_class = fc_classifier(val_pred_final)
+
+
+                    val_bat_loss = loss(val_pred_class, val_target)
                     val_loss += val_bat_loss.cpu().item()
 
-                    val_acc += np.sum(np.argmax(val_pred.cpu().data.numpy(), axis=1) == valdata[1].numpy())
-                    val_rel.append(val_pred)
+                    val_acc += np.sum(np.argmax(val_pred_class.cpu().data.numpy(), axis=1) == val_x_global[1].numpy())
+                    val_rel.append(val_pred_final)
 
-
-            val_acc = val_acc/val_loader.dataset.__len__()
+            val_acc = val_acc/global_val_loader.dataset.__len__()
             if val_acc > max_acc:
                 torch.save(model, save_path)
                 max_acc = val_acc
 
 
-            plt_val_loss.append(val_loss/val_loader.dataset.__len__())
+            plt_val_loss.append(val_loss/global_val_loader.dataset.__len__())
             plt_val_acc.append(val_acc)
             print('[%03d/%03d] %2.2f sec(s) TrainAcc : %3.6f TrainLoss : %3.6f | valAcc: %3.6f valLoss: %3.6f  ' % \
                   (i, epoch, time.time()-start_time, plt_train_acc[-1], plt_train_loss[-1], plt_val_acc[-1], plt_val_loss[-1])
